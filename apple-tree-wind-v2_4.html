@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Apple Tree — Wind Study II</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    background: #eeeae3;
+    font-family: 'Georgia', serif;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    touch-action: none;
+  }
+
+  #canvas-container { position: absolute; inset: 0; }
+  canvas { display: block; touch-action: none; }
+
+  /* ═══════════════════════════════════════
+     BEAUFORT PANEL  (right side, full height)
+     Scale: 12 at TOP → 0 at BOTTOM
+     Slider: drag DOWN to increase wind
+  ═══════════════════════════════════════ */
+  #beaufort-panel {
+    position: fixed;
+    right: 0; top: 0; bottom: 0;
+    width: 200px;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    z-index: 10;
+    user-select: none;
+    /* subtle background for readability */
+    background: linear-gradient(to left, rgba(238,234,227,0.92) 0%, rgba(238,234,227,0) 100%);
+  }
+
+  /* ── Scale column (labels) ── */
+  #scale-column {
+    flex: 1;
+    display: flex;
+    flex-direction: column;        /* row 12 first, row 0 last */
+    justify-content: space-between;
+    padding: 16px 6px 16px 10px;
+    min-width: 0;
+  }
+
+  .bft-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    transition: opacity 0.25s;
+    min-height: 0;
+  }
+  /* Rows ABOVE active (higher Bft numbers, towards top) are dimmed */
+  .bft-row.dimmed  { opacity: 0.2; }
+  .bft-row.active .bft-num  { color: var(--ac, #2c1f13); font-weight: bold; }
+  .bft-row.active .bft-name { color: var(--ac, #2c1f13); font-weight: bold; }
+  .bft-row.active .bft-tick { background: var(--ac, #2c1f13); width: 12px; }
+
+  .bft-num {
+    font-size: 12px;
+    color: #7a6c60;
+    width: 17px;
+    text-align: right;
+    flex-shrink: 0;
+    line-height: 1.3;
+    transition: color 0.2s;
+  }
+  .bft-tick {
+    width: 6px; height: 1.5px;
+    background: #b0a89e;
+    flex-shrink: 0;
+    margin-top: 7px;
+    transition: width 0.2s, background 0.2s;
+  }
+  .bft-label { display: flex; flex-direction: column; min-width: 0; }
+  .bft-name {
+    font-size: 11px;
+    color: #7a6c60;
+    white-space: nowrap;
+    line-height: 1.3;
+    transition: color 0.2s;
+  }
+  .bft-desc {
+    font-size: 9.5px;
+    color: #9a8e84;
+    line-height: 1.4;
+    white-space: normal;
+    display: none;
+    margin-top: 2px;
+    font-style: italic;
+    max-width: 130px;
+  }
+  .bft-row.active .bft-desc { display: block; }
+
+  /* ── Slider column ── */
+  #slider-column {
+    width: 44px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 0;
+    position: relative;
+  }
+
+  #track-wrap {
+    position: relative;
+    flex: 1;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+
+  /* Colour track: top=hurricane red, bottom=calm grey */
+  #track-bg {
+    position: absolute;
+    left: 50%; top: 0; bottom: 0;
+    width: 6px;
+    transform: translateX(-50%);
+    border-radius: 3px;
+    background: linear-gradient(
+      to bottom,
+      #6e0c0c 0%,   /* 12 Hurricane */
+      #a02020 8%,   /* 11 */
+      #b83020 17%,  /* 10 */
+      #c85020 25%,  /* 9  */
+      #d07028 33%,  /* 8  */
+      #cc8830 42%,  /* 7  */
+      #c0a840 52%,  /* 6  */
+      #9cb840 62%,  /* 5  */
+      #70a830 72%,  /* 4  */
+      #50a020 82%,  /* 3  */
+      #389018 90%,  /* 2  */
+      #c0bab2 100%  /* 0–1 calm */
+    );
+  }
+
+  /* Grey mask that covers from TOP downward = above current value */
+  #track-fill {
+    position: absolute;
+    left: 50%; top: 0;
+    width: 6px;
+    transform: translateX(-50%);
+    border-radius: 3px 3px 0 0;
+    background: #dedad3;
+    transition: height 0.05s;
+  }
+
+  /* Vertical range input — drag DOWN = higher value */
+  #wind-slider {
+    position: absolute;
+    top: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 44px;
+    height: 100%;
+    opacity: 0;          /* invisible — we draw our own track; thumb is custom below */
+    cursor: ns-resize;
+    touch-action: none;
+    margin: 0; padding: 0;
+    -webkit-appearance: none;
+    appearance: none;
+    writing-mode: vertical-lr;
+    direction: rtl;
+  }
+
+  /* Custom thumb overlay */
+  #slider-thumb {
+    position: absolute;
+    left: 50%;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: #2c1f13;
+    border: 3px solid #eeeae3;
+    box-shadow: 0 2px 14px rgba(0,0,0,0.45);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    transition: transform 0.05s;
+    top: 0; /* set by JS */
+  }
+
+  /* ── Status bar at bottom ── */
+  #status-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 200px;
+    padding: 14px 20px 18px;
+    background: linear-gradient(to top, rgba(238,234,227,0.95) 0%, rgba(238,234,227,0) 100%);
+    z-index: 10;
+    pointer-events: none;
+  }
+  #status-force {
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #2c1f13;
+    margin-bottom: 3px;
+  }
+  #status-force span { font-weight: bold; }
+  #status-name {
+    font-size: 16px;
+    color: #2c1f13;
+    letter-spacing: 0.06em;
+    margin-bottom: 5px;
+  }
+  #status-desc {
+    font-size: 11px;
+    color: #6a5e54;
+    font-style: italic;
+    line-height: 1.5;
+    max-width: 420px;
+  }
+
+  /* ── Corner tag ── */
+  #tag {
+    position: fixed;
+    left: 16px; top: 16px;
+    font-size: 10px;
+    color: #8a7868;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  /* ── Hurricane flash ── */
+  #hurricane-flash {
+    position: fixed; inset: 0;
+    background: rgba(100,10,10,0);
+    pointer-events: none;
+    z-index: 100;
+    transition: background 0.3s;
+  }
+
+  /* ═══════════════════
+     MOBILE  ≤ 600px
+  ═══════════════════ */
+  @media (max-width: 600px) {
+
+    /* Slim strip at very bottom — slider track only, no labels */
+    #beaufort-panel {
+      right: 0; left: 0;
+      top: auto; bottom: 0;
+      width: 100%;
+      height: 60px;
+      flex-direction: row;
+      align-items: center;
+      padding: 0 20px;
+      background: linear-gradient(to top, rgba(238,234,227,0.98) 55%, rgba(238,234,227,0) 100%);
+    }
+
+    /* Hide scale column entirely */
+    #scale-column { display: none; }
+
+    /* Slider column fills the strip */
+    #slider-column {
+      width: 100%;
+      flex-direction: row;
+      height: 60px;
+      padding: 0;
+      align-items: center;
+    }
+
+    #track-wrap {
+      flex: 1;
+      height: 60px;
+      position: relative;
+    }
+
+    /* Horizontal track: left = calm, right = hurricane */
+    #track-bg {
+      top: 50%; left: 0; right: 0; bottom: auto;
+      width: 100%;
+      height: 7px;
+      transform: translateY(-50%);
+      border-radius: 4px;
+      background: linear-gradient(
+        to right,
+        #c0bab2 0%,
+        #389018 10%, #50a020 18%, #70a830 28%,
+        #9cb840 38%, #c0a840 48%, #cc8830 58%,
+        #d07028 67%, #c85020 75%, #b83020 83%,
+        #a02020 92%, #6e0c0c 100%
+      );
+    }
+
+    /* Grey mask covers the right (wind not yet reached) */
+    #track-fill {
+      top: 50%; right: 0; left: auto; bottom: auto;
+      height: 7px;
+      transform: translateY(-50%);
+      border-radius: 0 4px 4px 0;
+      width: 100%; /* overridden by JS */
+    }
+
+    #slider-thumb {
+      top: 50%;
+      left: 0; /* set by JS */
+      transform: translate(-50%, -50%);
+    }
+
+    /* Status bar: just a floating force name, bottom-left above strip */
+    #status-bar {
+      right: auto;
+      left: 16px;
+      bottom: 68px;
+      padding: 0;
+      background: none;
+    }
+    #status-force { display: none; }
+    #status-desc  { display: none; }
+    #status-name  {
+      font-size: 15px;
+      margin-bottom: 0;
+    }
+
+    #tag { font-size: 9px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+<div id="hurricane-flash"></div>
+
+<div id="beaufort-panel">
+  <div id="scale-column"><!-- rows inserted by JS --></div>
+  <div id="slider-column">
+    <div id="track-wrap">
+      <div id="track-bg"></div>
+      <div id="track-fill"></div>
+      <input type="range" id="wind-slider" min="0" max="12" value="2" step="0.01">
+      <div id="slider-thumb"></div>
+    </div>
+  </div>
+</div>
+
+<div id="status-bar">
+  <div id="status-force">Force <span id="sf-num">2</span></div>
+  <div id="status-name" id="sf-name">Light Breeze</div>
+  <div id="status-desc" id="sf-desc">Leaves rustle steadily; blossom clusters lightly nod. Thin new shoots quiver.</div>
+</div>
+
+<div id="tag">Wind Study No. II — Malus domestica</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+
+// ═══════════════════════════════════════════════════════════════════
+//  SCENE
+// ═══════════════════════════════════════════════════════════════════
+const container = document.getElementById('canvas-container');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0xeeeae3, 1);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+container.appendChild(renderer.domElement);
+
+// ── Zoom constants (used by both camera init and orbit controls) ──
+const ZOOM_MIN     = 18;
+const ZOOM_MAX     = 80;
+const ZOOM_DEFAULT = window.innerWidth <= 600 ? 60 : 42;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0xeeeae3, 0.012);
+
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 600);
+// Tree spans y≈0–28, centre y≈14. Camera sits in front at default zoom.
+camera.position.set(0, 14, ZOOM_DEFAULT);
+camera.lookAt(0, 14, 0);
+
+// ── Lighting ────────────────────────────────────────────────────────
+const ambient = new THREE.AmbientLight(0xfdf5e8, 0.75);
+scene.add(ambient);
+
+const sun = new THREE.DirectionalLight(0xfff2d0, 1.4);
+sun.position.set(20, 35, 12);
+sun.castShadow = true;
+sun.shadow.mapSize.width = 2048;
+sun.shadow.mapSize.height = 2048;
+sun.shadow.camera.left = -35; sun.shadow.camera.right = 35;
+sun.shadow.camera.top = 35;  sun.shadow.camera.bottom = -35;
+sun.shadow.camera.far = 200;
+sun.shadow.bias = -0.001;
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0xc8d8f0, 0.35);
+fill.position.set(-15, 8, -8);
+scene.add(fill);
+
+const rim = new THREE.DirectionalLight(0xffe8a0, 0.2);
+rim.position.set(0, 5, -20);
+scene.add(rim);
+
+// ── Ground ──────────────────────────────────────────────────────────
+const groundGeo = new THREE.CircleGeometry(50, 64);
+const groundMat = new THREE.MeshLambertMaterial({ color: 0xe8e2d8 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Subtle ground ring
+const ringGeo = new THREE.RingGeometry(1.5, 2.5, 32);
+const ringMat = new THREE.MeshLambertMaterial({ color: 0xc8c0b0, side: THREE.DoubleSide });
+const ring = new THREE.Mesh(ringGeo, ringMat);
+ring.rotation.x = -Math.PI / 2;
+ring.position.y = 0.01;
+scene.add(ring);
+
+// ═══════════════════════════════════════════════════════════════════
+//  MATERIALS
+// ═══════════════════════════════════════════════════════════════════
+// Bark colours — more naturalistic gradient via multiple mats
+const matTrunk   = new THREE.MeshLambertMaterial({ color: 0x291a0e });
+const matBarkMid = new THREE.MeshLambertMaterial({ color: 0x3e2a17 });
+const matBarkTip = new THREE.MeshLambertMaterial({ color: 0x4d3420 });
+const matTwig    = new THREE.MeshLambertMaterial({ color: 0x5a3e28 });
+
+// Foliage — five slightly varying greens for depth
+const leafMats = [
+  new THREE.MeshLambertMaterial({ color: 0x1e2b0f, side: THREE.DoubleSide }),
+  new THREE.MeshLambertMaterial({ color: 0x253510, side: THREE.DoubleSide }),
+  new THREE.MeshLambertMaterial({ color: 0x2a3e12, side: THREE.DoubleSide }),
+  new THREE.MeshLambertMaterial({ color: 0x1a2a0c, side: THREE.DoubleSide }),
+  new THREE.MeshLambertMaterial({ color: 0x314a15, side: THREE.DoubleSide }),
+];
+const leafMatLight = new THREE.MeshLambertMaterial({ color: 0x8aac40, side: THREE.DoubleSide });
+
+// Apple materials
+const matApple     = new THREE.MeshLambertMaterial({ color: 0x7a9428 });
+const matAppleGold = new THREE.MeshLambertMaterial({ color: 0xd4aa20 });
+const matAppleRed  = new THREE.MeshLambertMaterial({ color: 0xb84020 });
+const matStem      = new THREE.MeshLambertMaterial({ color: 0x2a1a0a });
+
+// ═══════════════════════════════════════════════════════════════════
+//  WIND NODES  (collected for animation)
+// ═══════════════════════════════════════════════════════════════════
+const windNodes = [];
+// node: { mesh, originPos, originRot, windFactor, phase, type }
+// type: 'branch' | 'leaf' | 'apple'
+
+// ── Helpers ─────────────────────────────────────────────────────────
+const _v = (x,y,z) => new THREE.Vector3(x,y,z);
+
+function addBranch(parent, from, to, r0, r1, wf, phase, depth) {
+  const dir = new THREE.Vector3().subVectors(to, from);
+  const len = dir.length();
+  const segs = depth < 2 ? 4 : 3;
+  const geo = new THREE.CylinderGeometry(r1, r0, len, segs, 1);
+  const mat = r0 > 0.35 ? matTrunk : r0 > 0.18 ? matBarkMid : r0 > 0.10 ? matBarkTip : matTwig;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+
+  const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
+  mesh.position.copy(mid);
+
+  // Orient along direction
+  const axis = new THREE.Vector3(0,1,0);
+  const normDir = dir.clone().normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(axis, normDir);
+  mesh.quaternion.copy(q);
+
+  parent.add(mesh);
+  windNodes.push({ mesh, originPos: mid.clone(), originRot: mesh.rotation.clone(), originQuat: q.clone(), windFactor: wf, phase, type: 'branch' });
+  return mesh;
+}
+
+// Build a realistic leaf: elliptical plane with slight curl
+function makeLeaf(scale) {
+  const shape = new THREE.Shape();
+  shape.ellipse(0, 0, 0.45 * scale, 0.7 * scale, 0, Math.PI * 2, false, 0);
+  const geo = new THREE.ShapeGeometry(shape, 6);
+  // Slight midrib curl via vertex displacement
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const curl = (x * x) / (0.45 * scale * 0.45 * scale) * 0.12 * scale;
+    pos.setZ(i, curl);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function addLeafCluster(parent, pos, scale, wf, phase, density) {
+  const group = new THREE.Group();
+  group.position.copy(pos);
+  parent.add(group);
+
+  const count = density || (20 + Math.floor(Math.random() * 18));
+  const leafGeo = makeLeaf(scale);
+
+  for (let i = 0; i < count; i++) {
+    const mat = Math.random() > 0.85 ? leafMatLight : leafMats[Math.floor(Math.random() * leafMats.length)];
+    const leaf = new THREE.Mesh(leafGeo, mat);
+    leaf.castShadow = true;
+
+    const r = (Math.random() * 1.8 + 0.3) * scale;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI;
+    leaf.position.set(
+      r * Math.sin(phi) * Math.cos(theta),
+      r * Math.cos(phi) * 0.6,
+      r * Math.sin(phi) * Math.sin(theta)
+    );
+    leaf.rotation.set(
+      Math.random() * Math.PI * 2,
+      Math.random() * Math.PI * 2,
+      Math.random() * Math.PI * 2
+    );
+    leaf.userData.leafPhase = Math.random() * Math.PI * 2;
+    leaf.userData.leafAxis = new THREE.Vector3(
+      Math.random() - 0.5,
+      Math.random() - 0.5,
+      Math.random() - 0.5
+    ).normalize();
+    group.add(leaf);
+  }
+
+  windNodes.push({ mesh: group, originPos: pos.clone(), originRot: new THREE.Euler(), windFactor: wf, phase, type: 'leaf' });
+  return group;
+}
+
+function addApple(parent, pos, size) {
+  const group = new THREE.Group();
+  group.position.copy(pos);
+  parent.add(group);
+
+  // Body
+  const geo = new THREE.SphereGeometry(size, 10, 10);
+  const body = new THREE.Mesh(geo, matApple);
+  body.castShadow = true;
+  group.add(body);
+
+  // Blush patch
+  const blushGeo = new THREE.SphereGeometry(size * 0.65, 8, 8);
+  const blush = new THREE.Mesh(blushGeo, Math.random() > 0.5 ? matAppleGold : matAppleRed);
+  blush.position.set(size * 0.15, size * 0.2, size * 0.25);
+  group.add(blush);
+
+  // Stem
+  const stemGeo = new THREE.CylinderGeometry(0.025, 0.03, size * 0.6, 4);
+  const stem = new THREE.Mesh(stemGeo, matStem);
+  stem.position.y = size * 0.85;
+  stem.rotation.z = 0.15;
+  group.add(stem);
+
+  windNodes.push({ mesh: group, originPos: pos.clone(), originRot: group.rotation.clone(), windFactor: 0.7, phase: Math.random() * Math.PI * 2, type: 'apple' });
+  return group;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  BUILD TREE
+// ═══════════════════════════════════════════════════════════════════
+const tree = new THREE.Group();
+scene.add(tree);
+
+// ── TRUNK ────────────────────────────────────────────────────────────
+// Segmented trunk for more natural taper
+addBranch(tree, _v(0,0,0),   _v(0.1,3.5,0.1), 0.65,0.58, 0.02,0, 0);
+addBranch(tree, _v(0.1,3.5,0.1), _v(0.3,7,0.2),   0.58,0.48, 0.04,0, 0);
+addBranch(tree, _v(0.3,7,0.2),   _v(0.5,10.5,0.1),0.48,0.38, 0.07,0.1, 0);
+addBranch(tree, _v(0.5,10.5,0.1),_v(0.7,14,0.3),  0.38,0.28, 0.10,0.15,1);
+
+// ── PRIMARY SCAFFOLDS ───────────────────────────────────────────────
+// Right arching scaffold (dominant in the illustration)
+const rA = [
+  [_v(0.3,7,0.2),  _v(2.5,10,0.1), 0.30,0.22, 0.18,0.4],
+  [_v(2.5,10,0.1), _v(4.5,13,-0.2),0.22,0.17, 0.24,0.5],
+  [_v(4.5,13,-0.2),_v(6,16.5,0),   0.17,0.13, 0.30,0.6],
+  [_v(6,16.5,0),   _v(5.5,20,0.5), 0.13,0.09, 0.38,0.7],
+  [_v(5.5,20,0.5), _v(4,22.5,1),   0.09,0.06, 0.46,0.8],
+];
+rA.forEach(([f,t,r0,r1,wf,ph]) => addBranch(tree,f,t,r0,r1,wf,ph,2));
+
+// Left swooping scaffold
+const lA = [
+  [_v(0.1,3.5,0.1),_v(-2,7,0.3),   0.30,0.22, 0.18,1.0],
+  [_v(-2,7,0.3),   _v(-4.5,10,0),  0.22,0.17, 0.25,1.1],
+  [_v(-4.5,10,0),  _v(-6.5,13,0.5),0.17,0.13, 0.32,1.2],
+  [_v(-6.5,13,0.5),_v(-7,17,0.8),  0.13,0.09, 0.40,1.3],
+  [_v(-7,17,0.8),  _v(-6,20.5,1),  0.09,0.06, 0.50,1.4],
+];
+lA.forEach(([f,t,r0,r1,wf,ph]) => addBranch(tree,f,t,r0,r1,wf,ph,2));
+
+// Central leader
+const cA = [
+  [_v(0.5,10.5,0.1),_v(1.2,14.5,0), 0.26,0.19, 0.15,0.25],
+  [_v(1.2,14.5,0),  _v(0.8,18.5,0.2),0.19,0.13,0.22,0.35],
+  [_v(0.8,18.5,0.2),_v(0,22,0.5),   0.13,0.08, 0.30,0.45],
+  [_v(0,22,0.5),    _v(-0.5,25,0.3),0.08,0.05, 0.40,0.55],
+];
+cA.forEach(([f,t,r0,r1,wf,ph]) => addBranch(tree,f,t,r0,r1,wf,ph,2));
+
+// ── SECONDARY BRANCHES ──────────────────────────────────────────────
+const sec = [
+  // Off right scaffold
+  [_v(2.5,10,0.1), _v(4,12.5,1.5),  0.15,0.10,0.28,0.9],
+  [_v(4.5,13,-0.2),_v(7,14.5,0.8),  0.14,0.09,0.32,1.0],
+  [_v(4.5,13,-0.2),_v(5.5,15,-1.5), 0.13,0.08,0.30,1.5],
+  [_v(6,16.5,0),   _v(8.5,17.5,0.5),0.12,0.08,0.36,1.1],
+  [_v(6,16.5,0),   _v(7,18.5,-1),   0.11,0.07,0.34,1.8],
+  [_v(5.5,20,0.5), _v(7.5,21,1.5),  0.09,0.06,0.44,1.2],
+  [_v(5.5,20,0.5), _v(4.5,22,-0.5), 0.08,0.05,0.42,2.0],
+  [_v(4,22.5,1),   _v(5.5,24,1.5),  0.07,0.04,0.52,1.3],
+  [_v(4,22.5,1),   _v(2.5,24,2),    0.07,0.04,0.50,2.3],
+  // Off left scaffold
+  [_v(-2,7,0.3),   _v(-4,9.5,-1),   0.15,0.10,0.27,1.6],
+  [_v(-4.5,10,0),  _v(-6.5,11,-1.2),0.14,0.09,0.32,1.7],
+  [_v(-4.5,10,0),  _v(-5.5,12.5,1.5),0.13,0.08,0.30,2.2],
+  [_v(-6.5,13,0.5),_v(-9,14.5,0),   0.13,0.08,0.37,1.8],
+  [_v(-6.5,13,0.5),_v(-7.5,15.5,-1),0.11,0.07,0.35,2.5],
+  [_v(-7,17,0.8),  _v(-9.5,18.5,0.5),0.09,0.06,0.44,1.9],
+  [_v(-7,17,0.8),  _v(-8,20,-0.5),  0.08,0.05,0.42,2.8],
+  [_v(-6,20.5,1),  _v(-8,22,1.5),   0.07,0.04,0.52,2.0],
+  [_v(-6,20.5,1),  _v(-4.5,23,0),   0.07,0.04,0.50,3.0],
+  // Off central leader
+  [_v(1.2,14.5,0), _v(3,16,1),      0.14,0.09,0.28,0.6],
+  [_v(1.2,14.5,0), _v(-1,16,-1),    0.13,0.08,0.26,1.2],
+  [_v(0.8,18.5,0.2),_v(3,19.5,0.8), 0.11,0.07,0.32,0.7],
+  [_v(0.8,18.5,0.2),_v(-1.5,20,-0.5),0.10,0.06,0.30,1.4],
+  [_v(0,22,0.5),   _v(2,23.5,1),    0.08,0.05,0.42,0.8],
+  [_v(0,22,0.5),   _v(-2,23.5,0),   0.08,0.05,0.40,1.6],
+  // Extra low branches for fullness
+  [_v(0.3,7,0.2),  _v(1.5,9.5,1.5), 0.18,0.12,0.22,0.7],
+  [_v(0.3,7,0.2),  _v(-1,9,-1.5),   0.17,0.11,0.20,1.5],
+  [_v(0.5,10.5,0.1),_v(2.5,12,1.8), 0.16,0.10,0.24,0.9],
+];
+sec.forEach(([f,t,r0,r1,wf,ph]) => addBranch(tree,f,t,r0,r1,wf,ph,2));
+
+// ── TERTIARY TWIGS ──────────────────────────────────────────────────
+const twig = [
+  // Right
+  [_v(4,12.5,1.5), _v(5.5,14,2.2),  0.07,0.04,0.42,2.0],
+  [_v(4,12.5,1.5), _v(3.5,14.5,0.8),0.07,0.04,0.40,2.5],
+  [_v(7,14.5,0.8), _v(8.5,16,0.3),  0.07,0.04,0.44,1.5],
+  [_v(7,14.5,0.8), _v(8,15,2),      0.06,0.04,0.44,3.0],
+  [_v(8.5,17.5,0.5),_v(10,18.5,0),  0.06,0.04,0.50,1.6],
+  [_v(8.5,17.5,0.5),_v(9,19,1.5),   0.06,0.04,0.48,3.2],
+  [_v(7.5,21,1.5), _v(8.5,22.5,1),  0.05,0.03,0.55,2.0],
+  [_v(7.5,21,1.5), _v(7,22.5,3),    0.05,0.03,0.55,3.5],
+  [_v(5.5,24,1.5), _v(6.5,25.5,1),  0.05,0.03,0.60,2.1],
+  [_v(2.5,24,2),   _v(1.5,26,1.5),  0.05,0.03,0.58,2.8],
+  // Left
+  [_v(-6.5,11,-1.2),_v(-8.5,13,-1.5),0.06,0.04,0.44,2.0],
+  [_v(-5.5,12.5,1.5),_v(-7,14,2.5), 0.06,0.04,0.42,2.5],
+  [_v(-9,14.5,0),  _v(-10.5,16,0.5),0.06,0.04,0.50,2.2],
+  [_v(-9,14.5,0),  _v(-10,15,-1),   0.06,0.04,0.48,3.0],
+  [_v(-9.5,18.5,0.5),_v(-11,20,1),  0.05,0.03,0.55,2.3],
+  [_v(-9.5,18.5,0.5),_v(-10.5,20,-0.5),0.05,0.03,0.53,3.2],
+  [_v(-8,22,1.5),  _v(-9,23.5,1),   0.05,0.03,0.58,2.4],
+  [_v(-4.5,23,0),  _v(-5.5,25,-0.5),0.05,0.03,0.56,3.5],
+  // Centre
+  [_v(3,16,1),     _v(4.5,17.5,1.5),0.07,0.04,0.36,0.8],
+  [_v(-1,16,-1),   _v(-2.5,17.5,-1.5),0.07,0.04,0.34,1.5],
+  [_v(3,19.5,0.8), _v(4.5,21,1),    0.06,0.04,0.42,1.0],
+  [_v(-1.5,20,-0.5),_v(-3,21.5,-1), 0.06,0.04,0.40,1.8],
+  [_v(2,23.5,1),   _v(2.5,25.5,1.5),0.05,0.03,0.50,1.2],
+  [_v(-2,23.5,0),  _v(-3,25.5,-0.5),0.05,0.03,0.48,2.0],
+  [_v(-0.5,25,0.3),_v(-1,27,0.5),   0.04,0.03,0.55,0.6],
+  [_v(-0.5,25,0.3),_v(0.5,27,0),    0.04,0.03,0.55,1.4],
+  // Low extra
+  [_v(1.5,9.5,1.5),_v(2.5,11.5,2.5),0.07,0.04,0.30,2.8],
+  [_v(-1,9,-1.5),  _v(-2.5,11,-2),  0.07,0.04,0.28,3.0],
+  [_v(2.5,12,1.8), _v(3.5,14,2.5),  0.07,0.04,0.32,2.5],
+];
+twig.forEach(([f,t,r0,r1,wf,ph]) => addBranch(tree,f,t,r0,r1,wf,ph,3));
+
+// ── LEAF CLUSTERS ────────────────────────────────────────────────────
+const leaves = [
+  // Top canopy
+  [_v(0,26,0.5),    1.05,0.55,0.3, 38],
+  [_v(-1,27,0.5),   0.95,0.56,0.7, 32],
+  [_v(0.5,27,0),    0.9, 0.55,1.2, 28],
+  // Right upper
+  [_v(6.5,25.5,1),  1.0, 0.62,2.2, 35],
+  [_v(8.5,22.5,1),  1.1, 0.60,2.0, 38],
+  [_v(7,22.5,3),    1.0, 0.60,3.5, 32],
+  [_v(7.5,21,1.5),  1.1, 0.58,2.0, 34],
+  [_v(4.5,22,-0.5), 1.0, 0.56,2.0, 30],
+  [_v(2.5,24,2),    1.0, 0.58,2.3, 32],
+  [_v(5.5,20,0.5),  1.05,0.52,0.8, 36],
+  [_v(9,19,1.5),    1.0, 0.56,3.2, 30],
+  [_v(10,18.5,0),   1.0, 0.55,1.6, 28],
+  [_v(8.5,16,0.3),  1.05,0.48,1.5, 32],
+  [_v(8,15,2),      1.0, 0.48,3.0, 28],
+  [_v(7,18.5,-1),   1.0, 0.50,1.8, 30],
+  [_v(5.5,15,-1.5), 1.0, 0.42,1.5, 28],
+  [_v(5.5,14,2.2),  1.0, 0.44,2.0, 28],
+  [_v(3.5,14.5,0.8),1.0, 0.40,2.5, 26],
+  [_v(4.5,17.5,1.5),1.0, 0.42,0.8, 28],
+  [_v(4.5,21,1),    1.0, 0.50,1.0, 30],
+  // Left upper
+  [_v(-8,22,1.5),   1.0, 0.62,2.4, 35],
+  [_v(-9,23.5,1),   1.0, 0.62,2.4, 32],
+  [_v(-5.5,25,-0.5),1.0, 0.62,3.5, 30],
+  [_v(-4.5,23,0),   1.0, 0.58,2.0, 34],
+  [_v(-6,20.5,1),   1.05,0.55,1.4, 36],
+  [_v(-9.5,18.5,0.5),1.1,0.58,2.3, 35],
+  [_v(-10.5,20,-0.5),1.0,0.58,3.2, 30],
+  [_v(-11,20,1),    1.0, 0.58,2.3, 28],
+  [_v(-10,15,-1),   1.0, 0.52,3.0, 28],
+  [_v(-10.5,16,0.5),1.05,0.52,2.2, 30],
+  [_v(-7,14,2.5),   1.0, 0.46,2.5, 28],
+  [_v(-8,15.5,-1),  1.0, 0.48,2.5, 26],
+  [_v(-7.5,15.5,-1),1.0, 0.46,2.5, 26],
+  [_v(-2.5,17.5,-1.5),1.0,0.40,1.5,26],
+  [_v(-3,21.5,-1),  1.0, 0.48,1.8, 28],
+  [_v(-3,25.5,-0.5),1.0, 0.58,2.0, 30],
+  // Central
+  [_v(2,23.5,1),    1.0, 0.52,1.2, 30],
+  [_v(-2,23.5,0),   1.0, 0.50,1.6, 30],
+  [_v(4.5,17.5,1.5),0.9, 0.40,0.8, 24],
+  [_v(3,19.5,0.8),  1.0, 0.42,1.0, 28],
+  [_v(-1.5,20,-0.5),1.0, 0.40,1.4, 26],
+  [_v(3,16,1),      1.0, 0.36,0.8, 26],
+  [_v(-1,16,-1),    1.0, 0.34,1.5, 24],
+  // Mid
+  [_v(3.5,14,2.5),  1.0, 0.38,2.5, 26],
+  [_v(2.5,11.5,2.5),0.95,0.32,2.8, 24],
+  [_v(-2.5,11,-2),  0.95,0.30,3.0, 24],
+  // Low
+  [_v(7,14.5,0.8),  1.0, 0.36,1.0, 28],
+  [_v(-6.5,11,-1.2),0.95,0.34,2.0, 24],
+  [_v(-5.5,12.5,1.5),0.95,0.32,2.2, 24],
+];
+
+leaves.forEach(([pos, scale, wf, phase, density]) => {
+  addLeafCluster(tree, pos, scale, wf, phase, density);
+});
+
+// ── APPLES ───────────────────────────────────────────────────────────
+const apples = [
+  // Right arch
+  [6.5,25.5,1.3,0.52], [7.5,22,1.8,0.50], [8,22,0.5,0.50],
+  [5,21.5,-0.8,0.50],  [4,22,2,0.50],     [5,23.5,2,0.48],
+  [9.5,18.5,0.2,0.50], [9,17.5,1.8,0.48],
+  [8.5,15.5,0.5,0.48], [7.5,14.5,2,0.48],
+  [5.5,14,-1.8,0.48],  [5,15,2.5,0.50],
+  // Left arch
+  [-8.5,22.5,1.3,0.52],[-9,21,0.2,0.50],
+  [-9.5,19,-0.8,0.50], [-10.5,18,1.2,0.50],
+  [-10.5,15.5,0.2,0.50],[-9.5,14.5,-1.2,0.48],
+  [-7.5,13.5,2.5,0.48],[-6,13,-1.5,0.48],
+  [-5.5,12.5,1.8,0.48],[-5,10.5,-0.5,0.50],
+  // Central
+  [-1,26.5,0.5,0.48], [0.5,26,0,0.48],
+  [2.5,24.5,1.5,0.50],[1.5,25.5,2,0.48],
+  [-2.5,24.5,-0.8,0.50],[-3.5,24,0,0.48],
+  [4,20.5,1.2,0.50],  [3.5,19.5,-0.3,0.50],
+  [-1.5,20.5,-1,0.50],[2.5,16.5,1.5,0.48],
+  // Low
+  [3,12.5,2.5,0.48],  [-2.5,11.5,-2.2,0.48],
+  [2.5,10.5,2,0.48],
+];
+apples.forEach(([x,y,z,s]) => addApple(tree, _v(x,y,z), s));
+
+// ═══════════════════════════════════════════════════════════════════
+//  ORBIT CONTROLS  (pointer events handle both mouse and touch)
+// ═══════════════════════════════════════════════════════════════════
+// Separation from slider: the slider's trackWrap calls setPointerCapture
+// on its pointer, so those pointer IDs never reach the canvas listeners.
+// The canvas element therefore only sees orbit gestures.
+
+let isDragging = false, prevX = 0, prevY = 0;
+let rotY = 0.2, rotX = 0.08, targetRotY = 0.2, targetRotX = 0.08;
+let zoom = ZOOM_DEFAULT, targetZoom = ZOOM_DEFAULT;
+
+// Track active canvas pointers for pinch-zoom
+const canvasPointers = new Map();
+let pinchDist0 = null, pinchZoom0 = null;
+let orbitPointerId = null;
+
+renderer.domElement.addEventListener('pointerdown', e => {
+  canvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  renderer.domElement.setPointerCapture(e.pointerId);
+
+  if (canvasPointers.size === 1) {
+    // Single finger / mouse — orbit
+    isDragging = true;
+    orbitPointerId = e.pointerId;
+    prevX = e.clientX; prevY = e.clientY;
+  } else if (canvasPointers.size === 2) {
+    // Two fingers — start pinch, disable orbit
+    isDragging = false;
+    orbitPointerId = null;
+    const pts = [...canvasPointers.values()];
+    const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+    pinchDist0 = Math.sqrt(dx*dx + dy*dy);
+    pinchZoom0 = targetZoom;
+  }
+});
+
+renderer.domElement.addEventListener('pointermove', e => {
+  if (!canvasPointers.has(e.pointerId)) return;
+  canvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (canvasPointers.size === 2 && pinchDist0 !== null) {
+    // Pinch zoom
+    const pts = [...canvasPointers.values()];
+    const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    targetZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinchZoom0 * (pinchDist0 / dist)));
+    return;
+  }
+
+  if (!isDragging || e.pointerId !== orbitPointerId) return;
+  targetRotY += (e.clientX - prevX) * 0.005;
+  targetRotX += (e.clientY - prevY) * 0.003;
+  targetRotX = Math.max(-0.55, Math.min(0.8, targetRotX));
+  prevX = e.clientX; prevY = e.clientY;
+});
+
+renderer.domElement.addEventListener('pointerup', e => {
+  canvasPointers.delete(e.pointerId);
+  if (canvasPointers.size < 2) { pinchDist0 = null; pinchZoom0 = null; }
+  if (e.pointerId === orbitPointerId) { isDragging = false; orbitPointerId = null; }
+});
+
+renderer.domElement.addEventListener('pointercancel', e => {
+  canvasPointers.delete(e.pointerId);
+  if (canvasPointers.size < 2) { pinchDist0 = null; pinchZoom0 = null; }
+  if (e.pointerId === orbitPointerId) { isDragging = false; orbitPointerId = null; }
+});
+
+// Scroll-wheel zoom (desktop)
+renderer.domElement.addEventListener('wheel', e => {
+  const delta = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaMode === 2 ? e.deltaY * 300 : e.deltaY;
+  targetZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, targetZoom + delta * 0.08));
+  e.preventDefault();
+}, { passive: false });
+
+// ═══════════════════════════════════════════════════════════════════
+//  BEAUFORT SCALE DATA
+// ═══════════════════════════════════════════════════════════════════
+const BEAUFORT = [
+  { n:0,  name:'Calm',            color:'#389018', desc:'Leaves hang still. Blossom scent just "sits" in the air, drift is minimal.' },
+  { n:1,  name:'Light Air',       color:'#50a020', desc:'A few leaves tremble. Grass tips move. You can see wind direction in light smoke.' },
+  { n:2,  name:'Light Breeze',    color:'#70a830', desc:'Leaves rustle steadily; blossom clusters lightly nod. Thin new shoots quiver.' },
+  { n:3,  name:'Gentle Breeze',   color:'#9cb840', desc:'Small twigs in constant motion. Trees shimmer as leaf undersides flash. Young trees flex slightly.' },
+  { n:4,  name:'Moderate Breeze', color:'#c0a840', desc:'Small branches move; can hear a low rushing through the canopy. Blossoms/petals start to blow off.' },
+  { n:5,  name:'Fresh Breeze',    color:'#cc8830', desc:'Whole crown sways. Fruitlets and spurs jostle; light branch rub. Windbreak effect becomes obvious.' },
+  { n:6,  name:'Strong Breeze',   color:'#d07028', desc:'Large branches in motion. Noticeable limb flex; loose ties flap. Some small fruit drop possible.' },
+  { n:7,  name:'Near Gale',       color:'#c85020', desc:'Whole trees in vigorous motion. Twigs snap occasionally; rattling through trellis/wires.' },
+  { n:8,  name:'Gale',            color:'#b83020', desc:'Branch break risk rises. Shoots tear; leaves strip in patches on exposed sides. Fruit drop increases.' },
+  { n:9,  name:'Severe Gale',     color:'#a02020', desc:'Significant limb damage likely. Trees lean hard; weak unions split. Widespread fruit loss.' },
+  { n:10, name:'Storm',           color:'#881818', desc:'Trees may uproot (especially in wet ground). Major structural damage to supports and sheds.' },
+  { n:11, name:'Violent Storm',   color:'#6e1010', desc:'Extensive blowdowns; large limbs torn out; trellis systems can fail. Access blocked by fallen trees.' },
+  { n:12, name:'Hurricane',       color:'#4a0808', desc:'Catastrophic orchard damage: widespread uprooting/snapping; long-distance debris; major infrastructure failure.' },
+];
+
+// ── Build scale rows: 12 at TOP, 0 at BOTTOM (matches slider direction) ──────
+const scaleCol = document.getElementById('scale-column');
+// Insert in reverse order so row 12 is first child (top)
+[...BEAUFORT].reverse().forEach(b => {
+  const row = document.createElement('div');
+  row.className = 'bft-row';
+  row.id = `bft-${b.n}`;
+  row.style.setProperty('--ac', b.color);
+  row.innerHTML = `
+    <span class="bft-num">${b.n}</span>
+    <span class="bft-tick"></span>
+    <span class="bft-label">
+      <span class="bft-name">${b.name}</span>
+      <span class="bft-desc">${b.desc}</span>
+    </span>`;
+  scaleCol.appendChild(row);
+});
+
+// ═══════════════════════════════════════════════════════════════════
+//  CUSTOM VERTICAL SLIDER
+//  The native <input type=range> is hidden (opacity:0) and used only
+//  for value storage. We drive a custom thumb via pointer events so
+//  it works identically on desktop and mobile, and the direction is
+//  correct: drag DOWN = increase wind (value 0→12 top→bottom).
+// ═══════════════════════════════════════════════════════════════════
+const windSlider  = document.getElementById('wind-slider');
+const trackWrap   = document.getElementById('track-wrap');
+const trackFillEl = document.getElementById('track-fill');
+const thumbEl     = document.getElementById('slider-thumb');
+const hurricaneEl = document.getElementById('hurricane-flash');
+
+const sfNum  = document.getElementById('sf-num');
+const sfName = document.getElementById('status-name');
+const sfDesc = document.getElementById('status-desc');
+
+let windTarget  = 2 / 12;
+let windCurrent = 2 / 12;
+let prevBftInt  = 2;
+let hurricaneMode = false;
+const snappedBranches = new Set();
+
+// ── Slider geometry helpers ───────────────────────────────────────
+const isMobile = () => window.innerWidth <= 600;
+
+function getTrackRect() { return trackWrap.getBoundingClientRect(); }
+
+// Convert slider value (0–12) → thumb position
+function valueToThumbPos(val) {
+  const r = getTrackRect();
+  if (isMobile()) {
+    // Horizontal: 0 = left, 12 = right
+    return { x: r.left + (val / 12) * r.width, y: r.top + r.height / 2 };
+  } else {
+    // Vertical: 0 = bottom, 12 = top → drag DOWN increases
+    // position from top: val=0 → bottom (100%), val=12 → top (0%)
+    return { x: r.left + r.width / 2, y: r.top + ((12 - val) / 12) * r.height };
+  }
+}
+
+// Convert pointer position → value (0–12)
+function pointerToValue(clientX, clientY) {
+  const r = getTrackRect();
+  if (isMobile()) {
+    const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    return frac * 12;
+  } else {
+    // Vertical: top=12, bottom=0
+    const frac = Math.max(0, Math.min(1, (clientY - r.top) / r.height));
+    return (1 - frac) * 12;
+  }
+}
+
+function updateThumb(val) {
+  if (isMobile()) {
+    const frac = val / 12;
+    // Thumb: horizontal position
+    thumbEl.style.left      = (frac * 100) + '%';
+    thumbEl.style.top       = '50%';
+    thumbEl.style.transform = 'translate(-50%, -50%)';
+    // Fill covers RIGHT (unused = higher wind = not yet reached)
+    trackFillEl.style.right     = '0';
+    trackFillEl.style.left      = 'auto';
+    trackFillEl.style.width     = ((1 - frac) * 100) + '%';
+    trackFillEl.style.height    = '6px';
+    trackFillEl.style.top       = '50%';
+    trackFillEl.style.bottom    = 'auto';
+    trackFillEl.style.transform = 'translateY(-50%)';
+    trackFillEl.style.borderRadius = '0 3px 3px 0';
+  } else {
+    const frac = val / 12; // 0=bottom, 1=top
+    // Thumb: vertical position — val=0 at bottom, val=12 at top
+    thumbEl.style.top       = ((1 - frac) * 100) + '%';
+    thumbEl.style.left      = '50%';
+    thumbEl.style.transform = 'translate(-50%, -50%)';
+    // Fill covers TOP (above thumb = calm/unused)
+    trackFillEl.style.top       = '0';
+    trackFillEl.style.height    = ((1 - frac) * 100) + '%';
+    trackFillEl.style.width     = '6px';
+    trackFillEl.style.left      = '50%';
+    trackFillEl.style.right     = 'auto';
+    trackFillEl.style.bottom    = 'auto';
+    trackFillEl.style.transform = 'translateX(-50%)';
+    trackFillEl.style.borderRadius = '3px 3px 0 0';
+  }
+}
+
+// ── Active scale row ──────────────────────────────────────────────
+function setActiveBft(val) {
+  const b = Math.min(12, Math.max(0, Math.round(val)));
+  if (b === prevBftInt) return;
+  prevBftInt = b;
+
+  BEAUFORT.forEach((entry, i) => {
+    const row = document.getElementById(`bft-${i}`);
+    if (!row) return;
+    row.classList.remove('active', 'dimmed');
+    if (i === b) row.classList.add('active');
+    // Rows with higher number than active = above thumb on scale = dimmed
+    else if (i > b) row.classList.add('dimmed');
+  });
+
+  // Update status bar
+  const entry = BEAUFORT[b];
+  sfNum.textContent  = b;
+  sfName.textContent = entry.name;
+  sfDesc.textContent = entry.desc;
+  sfName.style.color = entry.color;
+}
+
+let dragging = false;
+let sliderPointerId = null;
+
+function onDragStart(e) {
+  dragging = true;
+  sliderPointerId = e.pointerId;
+  trackWrap.setPointerCapture(e.pointerId); // captures this pointer exclusively
+  onDragMove(e);
+}
+function onDragMove(e) {
+  if (!dragging || e.pointerId !== sliderPointerId) return;
+  const val = pointerToValue(e.clientX, e.clientY);
+  applyValue(val);
+}
+function onDragEnd(e) {
+  if (e.pointerId === sliderPointerId) { dragging = false; sliderPointerId = null; }
+}
+
+// Pointer events only — setPointerCapture above ensures they never bleed to canvas
+trackWrap.style.touchAction = 'none'; // tell browser not to scroll/zoom over this element
+trackWrap.addEventListener('pointerdown', onDragStart);
+trackWrap.addEventListener('pointermove', onDragMove);
+trackWrap.addEventListener('pointerup',   onDragEnd);
+trackWrap.addEventListener('pointercancel', onDragEnd);
+
+function applyValue(val) {
+  val = Math.max(0, Math.min(12, val));
+  windSlider.value = val;
+  windTarget = val / 12;
+  updateThumb(val);
+  setActiveBft(val);
+  if (val >= 12) triggerHurricane();
+  else if (hurricaneMode && val < 11) endHurricane();
+}
+
+// ── Init ──────────────────────────────────────────────────────────
+function initSlider() {
+  setActiveBft(2);
+  updateThumb(2);
+}
+// Run after layout
+window.addEventListener('load', initSlider);
+setTimeout(initSlider, 50);
+window.addEventListener('resize', () => updateThumb(parseFloat(windSlider.value) || 2));
+
+// ── Branch snapping ───────────────────────────────────────────────
+const snapCandidates = windNodes.filter(n => n.type === 'branch' && n.windFactor > 0.35);
+
+function triggerHurricane() {
+  if (hurricaneMode) return;
+  hurricaneMode = true;
+  hurricaneEl.style.background = 'rgba(80,8,8,0.18)';
+  const toSnap = snapCandidates
+    .slice().sort(() => Math.random() - 0.5)
+    .slice(0, Math.floor(snapCandidates.length * 0.55));
+  toSnap.forEach((node, i) => {
+    setTimeout(() => {
+      if (snappedBranches.has(node)) return;
+      snappedBranches.add(node);
+      node.snapping = true;
+      node.snapStart = performance.now();
+      node.snapDir   = Math.random() > 0.5 ? 1 : -1;
+      node.snapAxis  = Math.random() > 0.5 ? 'z' : 'x';
+    }, i * 80 + Math.random() * 400);
+  });
+}
+
+function endHurricane() {
+  hurricaneMode = false;
+  hurricaneEl.style.background = 'rgba(80,8,8,0)';
+  snappedBranches.forEach(node => {
+    node.snapping = false;
+    node.snapped  = false;
+    node.mesh.visible = true;
+    node.mesh.rotation.set(node.originRot.x, node.originRot.y, node.originRot.z);
+    node.mesh.position.copy(node.originPos);
+  });
+  snappedBranches.clear();
+}
+
+windNodes.forEach(n => { if (n.type === 'branch') n.height = n.originPos.y; });
+
+// ═══════════════════════════════════════════════════════════════════
+//  ANIMATE
+// ═══════════════════════════════════════════════════════════════════
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t   = clock.getElapsedTime();
+  const now = performance.now();
+
+  // ── Camera ──
+  rotY += (targetRotY - rotY) * 0.07;
+  rotX += (targetRotX - rotX) * 0.07;
+  zoom += (targetZoom - zoom) * 0.07;
+  // lookAt centred on tree midpoint (y≈14). Camera orbits around that point.
+  const lookY = 14;
+  camera.position.set(
+    Math.sin(rotY) * Math.cos(rotX) * zoom,
+    lookY + Math.sin(rotX) * zoom,
+    Math.cos(rotY) * Math.cos(rotX) * zoom
+  );
+  camera.lookAt(0, lookY, 0);
+
+  // ── Wind ──
+  windCurrent += (windTarget - windCurrent) * 0.04;
+  const ws = windCurrent;
+  const wsScaled = Math.pow(ws, 1.6);
+
+  const baseWind = wsScaled;
+  const gust1    = wsScaled * 0.6  * Math.max(0, Math.sin(t * 0.28 + 0.5) * Math.sin(t * 0.72));
+  const gust2    = wsScaled * 0.35 * Math.max(0, Math.sin(t * 0.55 + 1.2));
+  const turbHi   = wsScaled * 0.4  * Math.sin(t * 3.5);
+  const turbMid  = wsScaled * 0.28 * Math.sin(t * 2.1 + 0.8);
+  const gust     = baseWind + gust1 + gust2;
+
+  if (hurricaneMode) {
+    const pulse = 0.18 + 0.06 * Math.sin(t * 4);
+    hurricaneEl.style.background = `rgba(80,8,8,${pulse})`;
+  }
+
+  windNodes.forEach(node => {
+    const { mesh, originPos, originRot, windFactor, phase, type } = node;
+    if (!mesh) return;
+
+    if (node.snapping) {
+      const elapsed = (now - node.snapStart) / 1000;
+      if (elapsed < 0.35) {
+        const p = elapsed / 0.35;
+        const snap = node.snapDir * p * (Math.PI * 0.7 + windFactor * 0.5);
+        mesh.rotation[node.snapAxis] = originRot[node.snapAxis] + snap;
+        mesh.rotation.y = originRot.y + node.snapDir * p * 0.4;
+        mesh.position.y = originPos.y - p * 1.5;
+      } else if (elapsed < 1.2) {
+        const fall = (elapsed - 0.35) / 0.85;
+        mesh.position.y = originPos.y - 1.5 - fall * 8;
+        mesh.position.x = originPos.x + node.snapDir * fall * 3;
+        mesh.rotation.z = originRot.z + node.snapDir * (Math.PI * 0.7 + fall * Math.PI);
+      } else {
+        node.snapping = false;
+        node.snapped  = true;
+        mesh.visible  = false;
+      }
+      return;
+    }
+    if (node.snapped) return;
+
+    if (type === 'branch') {
+      const heightScale = Math.max(0, originPos.y / 26);
+      const bendAmt = gust * windFactor * (0.06 + heightScale * 0.22);
+      mesh.rotation.z = originRot.z + bendAmt * Math.sin(t * 0.8 + phase);
+      mesh.rotation.x = originRot.x + bendAmt * 0.35 * Math.sin(t * 1.3 + phase + 1) * 0.5;
+
+    } else if (type === 'leaf') {
+      const disp  = gust * windFactor * (0.6 + 0.4 * Math.sin(t * 0.5 + phase));
+      const turbX = turbHi  * windFactor * 0.3;
+      const turbZ = turbMid * windFactor * 0.2;
+      mesh.position.x = originPos.x + disp * (0.8 + 0.2 * Math.sin(t * 1.8 + phase));
+      mesh.position.y = originPos.y - Math.abs(disp) * 0.06;
+      mesh.position.z = originPos.z + turbZ;
+      mesh.rotation.z = turbX * 0.5 * Math.sin(t * 0.9 + phase);
+      mesh.rotation.x = turbX * 0.3 * Math.cos(t * 0.7 + phase);
+      mesh.children.forEach(leaf => {
+        const lp   = phase + (leaf.userData.leafPhase || 0);
+        const axis = leaf.userData.leafAxis || new THREE.Vector3(0,0,1);
+        leaf.rotateOnAxis(axis, ws * 0.13 * Math.sin(t * 5.5 + lp) * 0.5);
+        leaf.rotation.y += ws * 0.07 * Math.sin(t * 8.0 + lp * 1.7);
+        if (ws > 0.45) leaf.rotation.z += ws * 0.045 * Math.sin(t * 3 + lp) * (1 - Math.random() * 0.3);
+      });
+
+    } else if (type === 'apple') {
+      const swing = gust * windFactor * 0.55;
+      mesh.position.x = originPos.x + swing * Math.sin(t * 1.1 + phase);
+      mesh.position.y = originPos.y - Math.abs(swing) * 0.16 * (1 + Math.abs(Math.sin(t * 1.1 + phase)));
+      mesh.position.z = originPos.z + swing * 0.3 * Math.cos(t * 0.9 + phase);
+      mesh.rotation.z = swing * 0.45 * Math.sin(t * 1.1 + phase);
+    }
+  });
+
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+animate();
+</script>
+</body>
+</html>
